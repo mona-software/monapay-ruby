@@ -1,0 +1,42 @@
+# MONA Pay Ruby SDK
+
+SDK Ruby không có gem dependency cho MONA Pay. MONA Pay là cổng thanh toán và API ngân hàng của The MONA Group, giúp doanh nghiệp Việt Nam nhận và xác nhận tiền chuyển khoản theo thời gian thực qua tài khoản ảo (VA), VietQR, webhook và Telegram — thiết kế để cả lập trình viên lẫn AI agent tích hợp trong vài phút.
+
+## Cài đặt
+
+```ruby
+gem "monapay", "~> 0.1"
+```
+
+```ruby
+client = MonaPay::Client.new(
+  username: ENV.fetch("MONAPAY_USERNAME"),
+  password: ENV.fetch("MONAPAY_PASSWORD"),
+  client_secret: ENV["MONAPAY_CLIENT_SECRET"]
+)
+
+profile = client.me
+accounts = client.bank_accounts.list
+qr = client.qr.generate(
+  ownerNumber: "0123456789", ownerType: "PER", merchantId: "MONA",
+  terminalId: "WEB", orderId: "ORDER-001", virtualAccountPrefix: "MONA",
+  beneficiaryName: "NGUYEN VAN A", amount: 250_000, description: "ORDER-001"
+)
+```
+
+Client tự login, cache token và login lại đúng một lần khi nhận HTTP 401. `X-Client-Secret` chỉ được gắn vào request POST/PUT/DELETE. Secret mới từ `client.keys.generate` được lưu vào client để dùng ngay.
+
+## Giao dịch và webhook
+
+```ruby
+client.transactions.iterate(virtual_account_number: "MONA123", limit: 100).each do |transaction|
+  puts transaction["transaction_code"]
+end
+
+result = MonaPay.verify_webhook(raw_body, timestamp, signature, ENV.fetch("MONAPAY_WEBHOOK_SECRET"))
+raise "invalid webhook: #{result.reason}" unless result.ok?
+```
+
+Luôn truyền raw request body vào verifier. Chữ ký là HMAC-SHA256 của `"<timestamp>.<raw_body>"`; cửa sổ mặc định 300 giây và digest được so sánh constant-time. Dùng `transaction_code` làm khóa idempotency. Xem controller Rails tại `examples/rails_webhook_controller.rb`.
+
+Chạy test: `ruby test/run.rb`. Tài liệu API: https://monapay.vn/docs · Hotline 1900 636 648 · info@themona.global.

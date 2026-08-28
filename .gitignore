@@ -1,0 +1,8 @@
+node_modules
+target
+_build
+deps
+.dart_tool
+build
+.DS_Store
+.env
