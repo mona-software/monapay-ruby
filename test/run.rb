@@ -37,6 +37,9 @@ class MonaPayTest < Minitest::Test
     assert_equal "secret", calls[1][:headers]["X-Client-Secret"]
     refute calls.last[:headers].key?("X-Client-Secret")
     assert_equal "Bearer token-2", calls.last[:headers]["Authorization"]
+    client.checkouts.create({ amount: 250_000 }, idempotency_key: "checkout-key")
+    assert_equal "checkout-key", calls.last[:headers]["Idempotency-Key"]
+    assert_equal "secret", calls.last[:headers]["X-Client-Secret"]
   end
 
   def test_iterator_paginates_and_since_id_is_client_side

@@ -20,12 +20,12 @@ puts profile
 
 `Client.from_env` ưu tiên client credentials, cache token tới gần hạn và tự lấy lại khi gặp HTTP 401. Username/password chỉ là fallback tương thích cũ, không dùng cho AI agent vì sẽ gãy khi bật 2FA.
 
-Các resource gồm `keys`, `bank_accounts`, `va`, `qr`, `transactions`, `webhooks`, `webhook_logs`, `sandbox`, `email_configs`, `email_logs` và `email_suppressions`.
+Các resource gồm `keys`, `payment_profile`, `checkouts`, `bank_accounts`, `va`, `qr`, `transactions`, `webhooks`, `webhook_logs`, `sandbox`, `email_configs`, `email_logs` và `email_suppressions`.
 
 ## Cài đặt
 
 ```ruby
-gem "monapay", "~> 0.3"
+gem "monapay", "~> 0.4"
 ```
 
 ```ruby
@@ -45,6 +45,18 @@ qr = client.qr.generate(
 ```
 
 Client tự login, cache token và login lại đúng một lần khi nhận HTTP 401. `X-Client-Secret` chỉ được gắn vào request POST/PUT/DELETE. Secret mới từ `client.keys.generate` được lưu vào client để dùng ngay.
+
+## Trang thanh toán (hosted checkout)
+
+```ruby
+checkout = client.checkouts.create({ amount: 250_000, order_code: "DH10234", return_url: "https://shop.vn/payment/return" })
+redirect_to checkout["checkout_url"], allow_other_host: true
+if event["type"] == "CHECKOUT_PAID"
+  fulfill_once(event.dig("data", "order_code"))
+end
+```
+
+SDK tự sinh `Idempotency-Key` cho `create` và `cancel`; truyền `idempotency_key:` khi anh chị cần dùng key riêng. Nguồn sự thật để giao hàng là webhook `CHECKOUT_PAID` hoặc kết quả `get`, không phải redirect trình duyệt.
 
 ## Giao dịch và webhook
 

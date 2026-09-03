@@ -3,11 +3,12 @@
 require "json"
 require "net/http"
 require "openssl"
+require "securerandom"
 require "thread"
 require "uri"
 
 module MonaPay
-  VERSION = "0.3.0"
+  VERSION = "0.4.0"
   DEFAULT_BASE_URL = "https://api.monapay.vn"
 
   class APIError < StandardError
@@ -63,7 +64,7 @@ module MonaPay
   private_class_method :secure_compare
 
   class Client
-    attr_reader :base_url, :keys, :va, :bank_accounts, :qr, :transactions, :webhooks, :webhook_logs,
+    attr_reader :base_url, :keys, :va, :bank_accounts, :payment_profile, :checkouts, :qr, :transactions, :webhooks, :webhook_logs,
                 :sandbox, :email_configs, :email_logs, :email_suppressions
 
     def initialize(client_id: nil, username: nil, password: nil, client_secret: nil, base_url: DEFAULT_BASE_URL, transport: nil,
@@ -92,6 +93,8 @@ module MonaPay
       @keys = KeysResource.new(self)
       @va = VirtualAccountsResource.new(self)
       @bank_accounts = BankAccountsResource.new(self)
+      @payment_profile = PaymentProfileResource.new(self)
+      @checkouts = CheckoutsResource.new(self)
       @qr = QRResource.new(self)
       @transactions = TransactionsResource.new(self)
       @webhooks = WebhooksResource.new(self)
@@ -141,10 +144,10 @@ module MonaPay
       @mutex.synchronize { @client_secret = secret.to_s }
     end
 
-    def request(method, path, body: nil, query: nil)
+    def request(method, path, body: nil, query: nil, headers: nil)
       login
       token = @mutex.synchronize { @access_token }
-      send_request(method, path, body: body, query: query, token: token)
+      send_request(method, path, body: body, query: query, headers: headers, token: token)
     rescue APIError => e
       raise unless e.status == 401
 
@@ -156,12 +159,13 @@ module MonaPay
       end
       login
       refreshed = @mutex.synchronize { @access_token }
-      send_request(method, path, body: body, query: query, token: refreshed)
+      send_request(method, path, body: body, query: query, headers: headers, token: refreshed)
     end
 
     private
 
-    def send_request(method, path, body: nil, query: nil, token: nil, authenticated: true)
+    def send_request(method, path, body: nil, query: nil, headers: nil, token: nil, authenticated: true)
+      custom_headers = headers
       uri = URI.parse(@base_url + path)
       uri.query = URI.encode_www_form(compact_query(query)) if query && !query.empty?
       headers = { "Accept" => "application/json" }
@@ -172,6 +176,7 @@ module MonaPay
       if authenticated && method != "GET" && !secret.empty?
         headers["X-Client-Secret"] = secret
       end
+      headers.merge!(custom_headers) if custom_headers
 
       status, raw = if @transport
                       normalize_response(@transport.call(method: method, url: uri.to_s, headers: headers, body: encoded))
@@ -254,6 +259,16 @@ module MonaPay
     def destroy(key_id)
       @client.request("DELETE", "/api/v1/client-keys/destroy/#{segment(key_id)}")
     end
+
+    def reveal(key_id, confirmation)
+      @client.request("POST", "/api/v1/client-keys/#{segment(key_id)}/reveal", body: confirmation)
+    end
+
+    def rotate(key_id)
+      data = @client.request("POST", "/api/v1/client-keys/#{segment(key_id)}/rotate", body: {})
+      @client.client_secret = data["client_secret"] if data.is_a?(Hash) && !data["client_secret"].to_s.empty?
+      data
+    end
   end
 
   class VirtualAccountsResource < Resource
@@ -283,6 +298,47 @@ module MonaPay
   class BankAccountsResource < Resource
     def list
       @client.request("GET", "/api/v1/client/bank-accounts")
+    end
+  end
+
+  class PaymentProfileResource < Resource
+    def get
+      @client.request("GET", "/api/v1/payment-profile")
+    end
+
+    def set(body)
+      @client.request("PUT", "/api/v1/payment-profile", body: body)
+    end
+
+    def rotate_return_secret
+      @client.request("POST", "/api/v1/payment-profile/rotate-return-secret", body: {})
+    end
+
+    def reveal_return_secret(confirmation)
+      @client.request("POST", "/api/v1/payment-profile/reveal-return-secret", body: confirmation)
+    end
+  end
+
+  class CheckoutsResource < Resource
+    def create(body, idempotency_key: nil)
+      @client.request("POST", "/api/v1/checkouts", body: body,
+                      headers: { "Idempotency-Key" => idempotency_key || SecureRandom.uuid })
+    end
+
+    def get(checkout_id)
+      @client.request("GET", "/api/v1/checkouts/#{segment(checkout_id)}")
+    end
+
+    def list(status: nil, order_code: nil, from_date: nil, to_date: nil, page: nil, limit: nil)
+      @client.request("GET", "/api/v1/checkouts", query: {
+                        status: status, order_code: order_code, from_date: from_date,
+                        to_date: to_date, page: page, limit: limit
+                      })
+    end
+
+    def cancel(checkout_id, idempotency_key: nil)
+      @client.request("POST", "/api/v1/checkouts/#{segment(checkout_id)}/cancel", body: {},
+                      headers: { "Idempotency-Key" => idempotency_key || SecureRandom.uuid })
     end
   end
 
