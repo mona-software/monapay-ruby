@@ -7,7 +7,7 @@ require "thread"
 require "uri"
 
 module MonaPay
-  VERSION = "0.1.0"
+  VERSION = "0.3.0"
   DEFAULT_BASE_URL = "https://api.monapay.vn"
 
   class APIError < StandardError
@@ -63,13 +63,18 @@ module MonaPay
   private_class_method :secure_compare
 
   class Client
-    attr_reader :base_url, :keys, :va, :bank_accounts, :qr, :transactions, :webhooks, :webhook_logs
+    attr_reader :base_url, :keys, :va, :bank_accounts, :qr, :transactions, :webhooks, :webhook_logs,
+                :sandbox, :email_configs, :email_logs, :email_suppressions
 
-    def initialize(username:, password:, client_secret: nil, base_url: DEFAULT_BASE_URL, transport: nil,
+    def initialize(client_id: nil, username: nil, password: nil, client_secret: nil, base_url: DEFAULT_BASE_URL, transport: nil,
                    open_timeout: 10, read_timeout: 30)
-      raise ArgumentError, "username là bắt buộc" if username.to_s.strip.empty?
-      raise ArgumentError, "password là bắt buộc" if password.to_s.empty?
+      has_client_credentials = !client_id.to_s.strip.empty? && !client_secret.to_s.strip.empty?
+      has_password_credentials = !username.to_s.strip.empty? && !password.to_s.empty?
+      unless has_client_credentials || has_password_credentials
+        raise ArgumentError, "Cần client_id + client_secret hoặc username + password; không dùng password cho AI agent vì sẽ gãy khi bật 2FA"
+      end
 
+      @client_id = client_id.to_s
       @username = username.to_s
       @password = password.to_s
       @client_secret = client_secret.to_s
@@ -81,6 +86,7 @@ module MonaPay
       @open_timeout = open_timeout
       @read_timeout = read_timeout
       @access_token = nil
+      @token_expires_at = 0
       @mutex = Mutex.new
 
       @keys = KeysResource.new(self)
@@ -90,20 +96,41 @@ module MonaPay
       @transactions = TransactionsResource.new(self)
       @webhooks = WebhooksResource.new(self)
       @webhook_logs = WebhookLogsResource.new(self)
+      @sandbox = SandboxResource.new(self)
+      @email_configs = EmailConfigsResource.new(self)
+      @email_logs = EmailLogsResource.new(self)
+      @email_suppressions = EmailSuppressionsResource.new(self)
     rescue URI::InvalidURIError => e
       raise ArgumentError, "base_url không hợp lệ: #{e.message}"
     end
 
+    def self.from_env(env = ENV, **options)
+      new(
+        client_id: env["MONAPAY_CLIENT_ID"], client_secret: env["MONAPAY_CLIENT_SECRET"],
+        username: env["MONAPAY_USERNAME"], password: env["MONAPAY_PASSWORD"],
+        base_url: env.fetch("MONAPAY_BASE_URL", DEFAULT_BASE_URL), **options
+      )
+    end
+
     def login
-      cached = @mutex.synchronize { @access_token }
+      cached = @mutex.synchronize { Time.now.to_f < @token_expires_at ? @access_token : nil }
       return cached if cached && !cached.empty?
 
-      data = send_request("POST", "/api/v1/client/login",
-                          body: { username: @username, password: @password }, authenticated: false)
+      using_client_credentials = !@client_id.empty? && !@client_secret.empty?
+      data = send_request(
+        "POST", using_client_credentials ? "/api/v1/oauth/token" : "/api/v1/client/login",
+        body: using_client_credentials ? { grant_type: "client_credentials", client_id: @client_id, client_secret: @client_secret } : { username: @username, password: @password },
+        authenticated: false
+      )
       token = data.is_a?(Hash) ? data["access_token"] : nil
       raise APIError.new("Response đăng nhập không có access_token", body: data) if token.to_s.empty?
 
-      @mutex.synchronize { @access_token ||= token }
+      expires_in = data["expires_in"] || (using_client_credentials ? 3600 : 86_400)
+      @mutex.synchronize do
+        @access_token = token
+        @token_expires_at = Time.now.to_f + [expires_in.to_f - 60, 0].max
+      end
+      token
     end
 
     def me
@@ -121,7 +148,12 @@ module MonaPay
     rescue APIError => e
       raise unless e.status == 401
 
-      @mutex.synchronize { @access_token = nil if @access_token == token }
+      @mutex.synchronize do
+        if @access_token == token
+          @access_token = nil
+          @token_expires_at = 0
+        end
+      end
       login
       refreshed = @mutex.synchronize { @access_token }
       send_request(method, path, body: body, query: query, token: refreshed)
@@ -342,6 +374,69 @@ module MonaPay
 
     def query(status, from_date, to_date, page, limit)
       { status: status, from_date: from_date, to_date: to_date, page: page, limit: limit }
+    end
+  end
+
+  class SandboxResource < Resource
+    def create_transaction(body)
+      @client.request("POST", "/api/v1/sandbox/transactions", body: body)
+    end
+  end
+
+  class EmailConfigsResource < Resource
+    def list
+      @client.request("GET", "/api/v1/email-configs")
+    end
+
+    def create(body)
+      @client.request("POST", "/api/v1/email-configs", body: body)
+    end
+
+    def get(config_id)
+      @client.request("GET", "/api/v1/email-configs/#{segment(config_id)}")
+    end
+
+    def update(config_id, body)
+      @client.request("PUT", "/api/v1/email-configs/#{segment(config_id)}", body: body)
+    end
+
+    def remove(config_id)
+      @client.request("DELETE", "/api/v1/email-configs/#{segment(config_id)}")
+    end
+
+    def verify(config_id, email:, code:)
+      @client.request("POST", "/api/v1/email-configs/#{segment(config_id)}/verify", body: { email: email, code: code })
+    end
+
+    def resend_verification(config_id, email)
+      @client.request("POST", "/api/v1/email-configs/#{segment(config_id)}/resend-verification", body: { email: email })
+    end
+
+    def test(config_id)
+      @client.request("POST", "/api/v1/email-configs/#{segment(config_id)}/test", body: {})
+    end
+  end
+
+  class EmailLogsResource < Resource
+    def list(config_id: nil, status: nil, event_type: nil, from_date: nil, to_date: nil, page: nil, limit: nil)
+      @client.request("GET", "/api/v1/email-logs", query: {
+                        config_id: config_id, status: status, event_type: event_type, from_date: from_date,
+                        to_date: to_date, page: page, limit: limit
+                      })
+    end
+
+    def stats(from_date: nil, to_date: nil)
+      @client.request("GET", "/api/v1/email-logs/stats", query: { from_date: from_date, to_date: to_date })
+    end
+  end
+
+  class EmailSuppressionsResource < Resource
+    def list
+      @client.request("GET", "/api/v1/email-suppressions")
+    end
+
+    def remove(email)
+      @client.request("DELETE", "/api/v1/email-suppressions/#{segment(email)}")
     end
   end
 end

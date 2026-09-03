@@ -15,9 +15,11 @@ class MonaPayTest < Minitest::Test
     me_count = 0
     transport = lambda do |request|
       calls << request
-      if request[:url].end_with?("/api/v1/client/login")
+      if request[:url].end_with?("/api/v1/oauth/token")
         login_count += 1
-        [200, envelope("access_token" => "token-#{login_count}")]
+        body = JSON.parse(request[:body])
+        assert_equal({ "grant_type" => "client_credentials", "client_id" => "client-id", "client_secret" => "secret" }, body)
+        [200, envelope("access_token" => "token-#{login_count}", "expires_in" => 3600)]
       elsif request[:url].end_with?("/api/v1/client/me")
         me_count += 1
         me_count == 1 ? [401, JSON.generate(detail: "expired")] : [200, envelope("username" => "user")]
@@ -25,7 +27,7 @@ class MonaPayTest < Minitest::Test
         [200, envelope("id" => "hook-1")]
       end
     end
-    client = MonaPay::Client.new(username: "user", password: "pass", client_secret: "secret",
+    client = MonaPay::Client.new(client_id: "client-id", client_secret: "secret",
                                  base_url: "https://example.test/", transport: transport)
 
     client.webhooks.create(name: "Shop", webhook_url: "https://shop.test/hook")

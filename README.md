@@ -1,11 +1,31 @@
 # MONA Pay Ruby SDK
 
-SDK Ruby không có gem dependency cho MONA Pay. MONA Pay là cổng thanh toán và API ngân hàng của The MONA Group, giúp doanh nghiệp Việt Nam nhận và xác nhận tiền chuyển khoản theo thời gian thực qua tài khoản ảo (VA), VietQR, webhook và Telegram — thiết kế để cả lập trình viên lẫn AI agent tích hợp trong vài phút.
+SDK Ruby không có gem dependency cho MONA Pay. MONA Pay là cổng thanh toán và API ngân hàng của The MONA Group, giúp doanh nghiệp Việt Nam nhận và xác nhận tiền chuyển khoản theo thời gian thực qua tài khoản ảo (VA), VietQR, webhook và Telegram, thiết kế để cả lập trình viên lẫn AI agent tích hợp trong vài phút.
+
+## Xác thực cho AI agent
+
+```bash
+export MONAPAY_CLIENT_ID="client-id"
+export MONAPAY_CLIENT_SECRET="client-secret"
+export MONAPAY_BASE_URL="https://api.monapay.vn"
+```
+
+```ruby
+client = MonaPay::Client.from_env
+profile = client.me
+qr = client.qr.generate(qr_body)
+sandbox = client.sandbox.create_transaction(virtual_account_number: "MONA123", amount: 10_000, description: "AI test")
+puts profile
+```
+
+`Client.from_env` ưu tiên client credentials, cache token tới gần hạn và tự lấy lại khi gặp HTTP 401. Username/password chỉ là fallback tương thích cũ, không dùng cho AI agent vì sẽ gãy khi bật 2FA.
+
+Các resource gồm `keys`, `bank_accounts`, `va`, `qr`, `transactions`, `webhooks`, `webhook_logs`, `sandbox`, `email_configs`, `email_logs` và `email_suppressions`.
 
 ## Cài đặt
 
 ```ruby
-gem "monapay", "~> 0.1"
+gem "monapay", "~> 0.3"
 ```
 
 ```ruby
