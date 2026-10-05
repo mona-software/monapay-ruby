@@ -72,3 +72,5 @@ raise "invalid webhook: #{result.reason}" unless result.ok?
 Luôn truyền raw request body vào verifier. Chữ ký là HMAC-SHA256 của `"<timestamp>.<raw_body>"`; cửa sổ mặc định 300 giây và digest được so sánh constant-time. Dùng `transaction_code` làm khóa idempotency. Xem controller Rails tại `examples/rails_webhook_controller.rb`.
 
 Chạy test: `ruby test/run.rb`. Tài liệu API: https://monapay.vn/docs · Hotline 1900 636 648 · info@themona.global.
+
+**MONA Pay thuộc bộ MONA Cloud của The MONA Group.**

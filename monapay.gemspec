@@ -15,8 +15,8 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*.rb", "README.md", "CHANGELOG.md", "LICENSE", "SECURITY.md", "examples/**/*.rb"]
   spec.require_paths = ["lib"]
   spec.metadata = {
-    "source_code_uri" => "https://github.com/themonagroup/monapay-ruby",
+    "source_code_uri" => "https://github.com/mona-software/monapay-ruby",
     "documentation_uri" => "https://monapay.vn/docs",
-    "bug_tracker_uri" => "https://github.com/themonagroup/monapay-ruby/issues"
+    "bug_tracker_uri" => "https://github.com/mona-software/monapay-ruby/issues"
   }
 end
